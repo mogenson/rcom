@@ -19,7 +19,7 @@ const PATH: &str = "COM1";
 
 /* serial port settings */
 static SETTINGS: SerialPortSettings = SerialPortSettings {
-    baud_rate: 115200,
+    baud_rate: 115_200,
     data_bits: DataBits::Eight,
     flow_control: FlowControl::None,
     parity: Parity::None,
@@ -70,7 +70,7 @@ fn main() {
     for line in stdin.lock().lines() {
         if let Ok(l) = line {
             writer_port
-                .write(format!("{}\n", l).as_bytes())
+                .write_all(format!("{}\n", l).as_bytes())
                 .expect("can't write to serial port");
         }
     }
