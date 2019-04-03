@@ -1,7 +1,3 @@
-extern crate serialport;
-
-#[cfg(unix)]
-use serialport::posix::TTYPort;
 use serialport::prelude::*;
 use serialport::SerialPortType;
 use std::env;
@@ -35,14 +31,11 @@ fn main() {
             let mut path = PathBuf::new();
             if let Ok(ports) = serialport::available_ports() {
                 for port in ports {
-                    match port.port_type {
-                        SerialPortType::UsbPort(info) => {
-                            /* found silicon labs usb serial port */
-                            if info.vid == VID && info.pid == PID {
-                                path.push(port.port_name);
-                            }
+                    if let SerialPortType::UsbPort(info) = port.port_type {
+                        /* found silicon labs usb serial port */
+                        if info.vid == VID && info.pid == PID {
+                            path.push(port.port_name);
                         }
-                        _ => (),
                     }
                 }
             }
@@ -59,9 +52,6 @@ fn main() {
     }
 
     /* open port */
-    #[cfg(unix)]
-    let writer_port = TTYPort::open(&path, &SETTINGS);
-    #[cfg(windows)]
     let writer_port = serialport::open_with_settings(&path, &SETTINGS);
 
     match writer_port {
@@ -79,13 +69,6 @@ fn main() {
         }
     };
     let mut writer_port = writer_port.unwrap();
-
-    /* remove exclusive access */
-    #[cfg(unix)]
-    match writer_port.set_exclusive(false) {
-        Ok(_) => (),
-        Err(error) => println!("Error setting non-exclusive: {}", error),
-    };
 
     /* start thread to read and print from serial port, byte by byte */
     let reader_port = writer_port.try_clone().expect("can't clone serial port");
