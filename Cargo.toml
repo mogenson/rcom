@@ -2,8 +2,10 @@
 name = "rcom"
 version = "0.2.0"
 authors = ["Michael Mogenson <michael.mogenson@gmail.com>"]
+description = "Root Robot Communication Terminal"
 edition = "2018"
 
 [dependencies]
 tokio = { version = "0.2.3", features = ["full"] }
 tokio-serial = "4.3.3"
+clap = "2.33.0"

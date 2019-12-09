@@ -1,10 +1,12 @@
+use clap::{crate_authors, crate_description, crate_name, crate_version};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio_serial::{DataBits, FlowControl, Parity, Serial, SerialPortSettings, StopBits};
 
+const PORT: &str = "PORT";
 #[cfg(unix)]
-const DEFAULT_TTY: &str = "/dev/ttyUSBC-DEBUG";
+const DEFAULT_PORT: &str = "/dev/ttyUSBC-DEBUG";
 #[cfg(windows)]
-const DEFAULT_TTY: &str = "COM1";
+const DEFAULT_PORT: &str = "COM1";
 
 static SETTINGS: SerialPortSettings = SerialPortSettings {
     baud_rate: 115_200,
@@ -16,10 +18,25 @@ static SETTINGS: SerialPortSettings = SerialPortSettings {
 };
 
 async fn runner() -> Result<(), std::io::Error> {
-    let tty_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| DEFAULT_TTY.into());
-    let port = Serial::from_path(tty_path, &SETTINGS).expect("Unable to open serial port");
+    let args = clap::App::new(crate_name!())
+        .version(crate_version!())
+        .author(crate_authors!())
+        .about(crate_description!())
+        .arg(
+            clap::Arg::with_name(PORT)
+                .help("Sets serial port")
+                .takes_value(true)
+                .short("p")
+                .long("port")
+                .default_value(DEFAULT_PORT),
+        )
+        .get_matches();
+
+    println!("Welcome to the Root Robot Communication Terminal (RCOM)");
+    let port_name = args.value_of(PORT).unwrap();
+    let port = Serial::from_path(port_name, &SETTINGS).expect("Unable to open serial port");
+    println!("\tConnected to serial port: {}", port_name);
+
     let (reader, mut writer) = tokio::io::split(port);
 
     let read = tokio::task::spawn_local(async {
