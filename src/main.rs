@@ -1,96 +1,54 @@
-use serialport::prelude::*;
-use serialport::SerialPortType;
-use std::env;
-use std::io;
-use std::io::prelude::*;
-use std::path::PathBuf;
-use std::process;
-use std::thread;
-use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio_serial::{DataBits, FlowControl, Parity, Serial, SerialPortSettings, StopBits};
 
-/* silicon labs usb serial cable */
-static VID: u16 = 0x10C4;
-static PID: u16 = 0xEA60;
+#[cfg(unix)]
+const DEFAULT_TTY: &str = "/dev/ttyUSBC-DEBUG";
+#[cfg(windows)]
+const DEFAULT_TTY: &str = "COM1";
 
-/* serial port settings */
 static SETTINGS: SerialPortSettings = SerialPortSettings {
     baud_rate: 115_200,
     data_bits: DataBits::Eight,
     flow_control: FlowControl::None,
     parity: Parity::None,
     stop_bits: StopBits::One,
-    timeout: Duration::from_secs(1),
+    timeout: std::time::Duration::from_secs(0),
 };
 
-fn main() {
-    /* accept serial port path or find one */
-    let first_arg = env::args().nth(1);
-    let path = match first_arg {
-        Some(path) => PathBuf::from(path),
-        None => {
-            let mut path = PathBuf::new();
-            if let Ok(ports) = serialport::available_ports() {
-                for port in ports {
-                    if let SerialPortType::UsbPort(info) = port.port_type {
-                        /* found silicon labs usb serial port */
-                        if info.vid == VID && info.pid == PID {
-                            path.push(port.port_name);
-                        }
-                    }
-                }
-            }
-            path
+async fn runner() -> Result<(), std::io::Error> {
+    let tty_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| DEFAULT_TTY.into());
+    let port = Serial::from_path(tty_path, &SETTINGS).expect("Unable to open serial port");
+    let (reader, mut writer) = tokio::io::split(port);
+
+    let read = tokio::task::spawn_local(async {
+        let mut lines = tokio::io::BufReader::new(reader).lines();
+        let mut stdout = tokio::io::stdout();
+        while let Some(line) = lines.next_line().await? {
+            stdout.write_all(format!("{}\n", line).as_bytes()).await?;
         }
-    };
 
-    /* print help */
-    println!("Welcome to the Root Robot Communication Terminal (RCOM)");
-    if !path.exists() {
-        println!("\tNo serial port found");
-        println!("\tUsage: rcom [/path/to/serialport]");
-        process::exit(0);
-    }
-
-    /* open port */
-    let writer_port = serialport::open_with_settings(&path, &SETTINGS);
-
-    match writer_port {
-        Ok(_) => println!(
-            "\tConnected to serial port: {}",
-            path.to_str().unwrap_or("None")
-        ),
-        Err(error) => {
-            println!(
-                "\tFailed to connect to serial port: {}",
-                path.to_str().unwrap_or("None")
-            );
-            println!("\tWith error: {}", error);
-            process::exit(0);
-        }
-    };
-    let mut writer_port = writer_port.unwrap();
-
-    /* start thread to read and print from serial port, byte by byte */
-    let reader_port = writer_port.try_clone().expect("can't clone serial port");
-    thread::spawn(move || {
-        for byte in reader_port.bytes() {
-            if let Ok(b) = byte {
-                if b == 0xA {
-                    println!(); // print new line if byte is \n
-                } else {
-                    print!("{}", b as char); // or print byte as char
-                }
-            }
-        }
+        Ok(()) as Result<(), std::io::Error>
     });
 
-    /* read from stdin, line by line */
-    let stdin = io::stdin();
-    for line in stdin.lock().lines() {
-        if let Ok(l) = line {
-            writer_port
-                .write_all(format!("{}\n", l).as_bytes())
-                .expect("can't write to serial port");
+    let write = tokio::task::spawn_local(async move {
+        let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+        while let Some(line) = lines.next_line().await? {
+            writer.write_all(format!("{}\n", line).as_bytes()).await?;
         }
-    }
+
+        Ok(()) as Result<(), std::io::Error>
+    });
+
+    read.await??;
+    write.await??;
+
+    Ok(())
+}
+
+fn main() -> Result<(), std::io::Error> {
+    let mut rt = tokio::runtime::Runtime::new()?;
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&mut rt, runner())
 }
